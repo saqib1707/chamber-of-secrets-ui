@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Vault</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#12151c" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<style>
+  /* Fixed slate / graphite / blue palette — intentionally does NOT follow
+     system light/dark preference, so it never flips to a near-white look. */
+  :root {
+    --bg: #12151c;        /* near-black slate */
+    --bg2: #0d0f14;       /* slightly deeper, for subtle depth (header strip, inputs) */
+    --panel: #1b202b;     /* card / row surface, blue-grey */
+    --panel-hover: #212838;
+    --border: #2d3544;
+    --text: #e4e7ec;
+    --muted: #8993a4;
+    --accent: #5f87d9;    /* blue */
+    --accent-hover: #6f95e0;
+    --good: #4caf82;
+    --bad: #e2676b;
+    --warn: #d9a74a;
+    --mono: "SF Mono", "Fira Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 20px 16px 60px; min-height: 100%; }
+  .centered { display: flex; align-items: center; justify-content: center; min-height: 80vh; }
+  h1 { font-size: 1.2rem; margin: 0; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin: 4px 0 0; line-height: 1.4; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 100%; max-width: 380px; }
+  label { display: block; font-size: 0.78rem; color: var(--muted); margin: 12px 0 4px; }
+  input, textarea {
+    width: 100%; background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 10px 12px; font-size: 0.95rem; font-family: inherit;
+  }
+  input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { font-family: var(--mono); font-size: 0.85rem; min-height: 90px; resize: vertical; }
+  button {
+    background: var(--accent); color: white; border: none; border-radius: 8px; padding: 11px 16px;
+    font-size: 0.9rem; font-weight: 600; cursor: pointer; margin-top: 14px; width: 100%;
+    transition: background 0.12s ease;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  button.danger { background: var(--bad); }
+  button.inline { width: auto; margin-top: 0; padding: 8px 12px; font-size: 0.82rem; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .status { font-size: 0.82rem; margin-top: 10px; line-height: 1.4; display: none; }
+  .status.show { display: block; }
+  .status.ok { color: var(--good); } .status.err { color: var(--bad); } .status.warn { color: var(--warn); }
+  .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; gap: 10px; }
+  .topbar .actions { display: flex; gap: 6px; }
+  .icon-btn {
+    width: auto; margin: 0; background: transparent; border: 1px solid var(--border); color: var(--text);
+    padding: 8px 10px; font-size: 1rem; line-height: 1;
+  }
+  .search-row { margin-bottom: 14px; }
+  .entry-list { display: flex; flex-direction: column; gap: 8px; }
+  .entry-row {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 13px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    transition: background 0.12s ease;
+  }
+  .entry-row:hover { background: var(--panel-hover); }
+  .entry-row:active { opacity: 0.8; }
+  .entry-row .title { font-size: 0.95rem; }
+  .entry-row .count { font-size: 0.75rem; color: var(--muted); }
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 0.9rem; }
+  .field-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .field-row input { flex: 1; }
+  .field-row input.key-input { flex: 0 0 38%; }
+  .remove-field-btn {
+    width: auto; margin: 0; background: transparent; border: 1px solid var(--border); color: var(--bad);
+    padding: 8px 10px; font-size: 0.85rem;
+  }
+  .dirty-banner {
+    background: rgba(232,184,75,0.12); border: 1px solid var(--warn); color: var(--warn);
+    border-radius: 8px; padding: 9px 12px; font-size: 0.82rem; margin-bottom: 14px; display: none;
+  }
+  .dirty-banner.show { display: block; }
+  .footer-actions { display: flex; gap: 8px; margin-top: 18px; }
+  .footer-actions button { margin-top: 0; }
+  .settings-row { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .settings-row button { width: auto; margin: 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .lock-emoji { font-size: 2rem; text-align: center; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+/* =========================================================================
+   Inlined crypto.js
+   ========================================================================= */
+const PBKDF2_ITERATIONS = 600000, SALT_BYTES = 16, IV_BYTES = 12;
+function toB64(bytes) { let b=''; for (let i=0;i<bytes.length;i++) b+=String.fromCharCode(bytes[i]); return btoa(b); }
+function fromB64(b64) { const bin=atob(b64); const bytes=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i); return bytes; }
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), {name:'PBKDF2'}, false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:PBKDF2_ITERATIONS, hash:'SHA-256'}, baseKey, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+async function encryptNewVault(password, dataObj) {
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(password, salt);
+  const pt = new TextEncoder().encode(JSON.stringify(dataObj));
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, pt);
+  return { version:1, salt:toB64(salt), iv:toB64(iv), ciphertext:toB64(new Uint8Array(ct)) };
+}
+async function encryptForExistingVault(password, saltB64, dataObj) {
+  const salt = fromB64(saltB64);
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(password, salt);
+  const pt = new TextEncoder().encode(JSON.stringify(dataObj));
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, pt);
+  return { version:1, salt:saltB64, iv:toB64(iv), ciphertext:toB64(new Uint8Array(ct)) };
+}
+async function decryptVault(password, vaultFile) {
+  const salt = fromB64(vaultFile.salt), iv = fromB64(vaultFile.iv), ciphertext = fromB64(vaultFile.ciphertext);
+  const key = await deriveKey(password, salt);
+  let pt;
+  try { pt = await crypto.subtle.decrypt({name:'AES-GCM', iv}, key, ciphertext); }
+  catch (e) { throw new Error('Wrong master password, or the vault file is corrupted.'); }
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+/* =========================================================================
+   Inlined github.js
+   ========================================================================= */
+const API_BASE = 'https://api.github.com';
+class ConflictError extends Error { constructor(m){ super(m); this.name='ConflictError'; } }
+class GitHubAuthError extends Error { constructor(m){ super(m); this.name='GitHubAuthError'; } }
+function toB64Utf8(str) { const bytes = new TextEncoder().encode(str); let b=''; for (let i=0;i<bytes.length;i++) b+=String.fromCharCode(bytes[i]); return btoa(b); }
+function fromB64Utf8(b64) { const cleaned=b64.replace(/\n/g,''); const bin=atob(cleaned); const bytes=new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i); return new TextDecoder().decode(bytes); }
+async function fetchVaultFile({token, owner, repo, path}) {
+  const url = `${API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const res = await fetch(url, { headers: { Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28' } });
+  if (res.status === 404) return { exists:false, sha:null, data:null };
+  if (res.status === 401 || res.status === 403) throw new GitHubAuthError(`GitHub rejected the token (HTTP ${res.status}). It may be expired or missing Contents: Read and write permission.`);
+  if (!res.ok) throw new Error(`GitHub fetch failed: HTTP ${res.status} ${await res.text()}`);
+  const json = await res.json();
+  const data = JSON.parse(fromB64Utf8(json.content));
+  return { exists:true, sha:json.sha, data };
+}
+async function pushVaultFile({token, owner, repo, path, dataObj, expectedSha, commitMessage}) {
+  const url = `${API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}`;
+  const body = { message: commitMessage || 'Update vault', content: toB64Utf8(JSON.stringify(dataObj, null, 2)) };
+  if (expectedSha) body.sha = expectedSha;
+  const res = await fetch(url, { method:'PUT', headers:{ Authorization:`Bearer ${token}`, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if (res.status === 409) throw new ConflictError('The vault on GitHub changed since you last fetched it. Reload and re-apply your edit.');
+  if (res.status === 401 || res.status === 403) throw new GitHubAuthError(`GitHub rejected the token (HTTP ${res.status}).`);
+  if (res.status === 422) {
+    const errText = await res.text();
+    if (errText.includes('sha')) throw new ConflictError('The vault on GitHub changed since you last fetched it. Reload and re-apply your edit.');
+    throw new Error(`GitHub rejected the request: HTTP 422 ${errText}`);
+  }
+  if (!res.ok) throw new Error(`GitHub push failed: HTTP ${res.status} ${await res.text()}`);
+  const json = await res.json();
+  return { sha: json.content.sha };
+}
+
+/* =========================================================================
+   Inlined entry-ops.js
+   ========================================================================= */
+function filterEntries(entries, query) {
+  const q = (query||'').trim().toLowerCase();
+  if (!q) return entries;
+  return entries.filter(e => e.title.toLowerCase().includes(q));
+}
+function upsertEntry(entries, entry, editIndex) {
+  const copy = entries.slice();
+  if (editIndex === null || editIndex === undefined) copy.push(entry);
+  else copy[editIndex] = entry;
+  return copy;
+}
+function removeEntry(entries, index) { return entries.slice(0,index).concat(entries.slice(index+1)); }
+function parseFieldLines(text) {
+  return (text||'').split('\n').map(l=>l.trim()).filter(Boolean).map(line=>{
+    const idx = line.indexOf(':');
+    if (idx===-1) return {key:line, value:''};
+    return {key:line.slice(0,idx).trim(), value:line.slice(idx+1).trim()};
+  });
+}
+function makeEntry(title, fields) {
+  return { title: (title||'').trim() || 'Untitled', fields, updatedAt: new Date().toISOString() };
+}
+
+/* =========================================================================
+   App state + persistence
+   ========================================================================= */
+const CONFIG_KEY = 'vaultapp_config';
+const TOKEN_BLOB_KEY = 'vaultapp_token_blob';
+const DEFAULT_IDLE_MINUTES = 5;
+
+const state = {
+  view: 'loading',       // 'setup' | 'lock' | 'main' | 'editor'
+  masterPassword: null,  // in-memory only, never persisted
+  githubToken: null,     // in-memory only, decrypted from localStorage token blob
+  config: null,          // { owner, repo, path }
+  vaultSalt: null,       // from the fetched vault file; needed to re-encrypt on save
+  currentSha: null,      // null until the vault file exists on GitHub
+  currentData: { entries: [] },
+  dirty: false,
+  editIndex: null,       // index being edited, or null for a new entry
+  searchQuery: '',
+  idleMinutes: DEFAULT_IDLE_MINUTES,
+  idleTimer: null,
+};
+
+function loadConfig() {
+  try { return JSON.parse(localStorage.getItem(CONFIG_KEY)); } catch (e) { return null; }
+}
+function saveConfig(cfg) { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); }
+function loadTokenBlob() {
+  try { return JSON.parse(localStorage.getItem(TOKEN_BLOB_KEY)); } catch (e) { return null; }
+}
+function saveTokenBlob(blob) { localStorage.setItem(TOKEN_BLOB_KEY, JSON.stringify(blob)); }
+
+/* =========================================================================
+   Idle / auto-lock
+   ========================================================================= */
+function resetIdleTimer() {
+  if (state.idleTimer) clearTimeout(state.idleTimer);
+  if (state.view !== 'main' && state.view !== 'editor') return;
+  state.idleTimer = setTimeout(() => {
+    if (state.dirty) {
+      // Don't discard unsaved work — just restart the timer and nag via the banner already shown.
+      resetIdleTimer();
+      return;
+    }
+    lock();
+  }, state.idleMinutes * 60 * 1000);
+}
+['click','keydown','touchstart','mousemove'].forEach(evt => {
+  document.addEventListener(evt, () => resetIdleTimer(), { passive: true });
+});
+
+function lock() {
+  state.masterPassword = null;
+  state.currentData = { entries: [] };
+  state.view = 'lock';
+  render();
+}
+
+/* =========================================================================
+   Rendering
+   ========================================================================= */
+const app = document.getElementById('app');
+
+function render() {
+  if (state.view === 'setup') return renderSetup();
+  if (state.view === 'lock') return renderLock();
+  if (state.view === 'main') return renderMain();
+  if (state.view === 'editor') return renderEditor();
+  app.innerHTML = '<div class="centered"><div class="sub">Loading…</div></div>';
+}
+
+function renderSetup() {
+  app.innerHTML = `
+    <div class="centered">
+      <div class="card">
+        <div class="lock-emoji">🔐</div>
+        <h1 style="text-align:center;">Set up your vault</h1>
+        <p class="sub" style="text-align:center;">One-time setup. Your token and password never leave this device unencrypted.</p>
+        <label>GitHub username</label>
+        <input id="su-owner" placeholder="e.g. sirius-saqib" />
+        <label>Repo name</label>
+        <input id="su-repo" placeholder="e.g. vault-data" />
+        <label>File path</label>
+        <input id="su-path" value="vault.json" />
+        <label>Fine-grained PAT</label>
+        <input id="su-token" type="password" placeholder="github_pat_..." autocomplete="off" />
+        <label>New master password</label>
+        <input id="su-pw1" type="password" autocomplete="off" />
+        <label>Confirm master password</label>
+        <input id="su-pw2" type="password" autocomplete="off" />
+        <button id="su-submit">Create vault</button>
+        <div id="su-status" class="status"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('su-submit').addEventListener('click', handleSetupSubmit);
+}
+
+async function handleSetupSubmit() {
+  const owner = document.getElementById('su-owner').value.trim();
+  const repo = document.getElementById('su-repo').value.trim();
+  const path = document.getElementById('su-path').value.trim() || 'vault.json';
+  const token = document.getElementById('su-token').value.trim();
+  const pw1 = document.getElementById('su-pw1').value;
+  const pw2 = document.getElementById('su-pw2').value;
+  const statusEl = document.getElementById('su-status');
+
+  if (!owner || !repo || !token) { setStatus(statusEl, 'Fill in all GitHub fields.', 'err'); return; }
+  if (!pw1 || pw1.length < 8) { setStatus(statusEl, 'Master password should be at least 8 characters.', 'err'); return; }
+  if (pw1 !== pw2) { setStatus(statusEl, 'Passwords do not match.', 'err'); return; }
+
+  setStatus(statusEl, 'Verifying token against GitHub…', 'ok');
+  try {
+    // Verify the token actually works before we commit to storing anything.
+    await fetchVaultFile({ token, owner, repo, path });
+  } catch (e) {
+    setStatus(statusEl, 'Could not verify token: ' + e.message, 'err');
+    return;
+  }
+
+  const tokenBlob = await encryptNewVault(pw1, { token });
+  saveConfig({ owner, repo, path });
+  saveTokenBlob(tokenBlob);
+
+  state.config = { owner, repo, path };
+  state.githubToken = token;
+  state.masterPassword = pw1;
+  await loadVaultFromGitHub(statusEl);
+}
+
+function renderLock() {
+  const cfg = state.config || loadConfig();
+  app.innerHTML = `
+    <div class="centered">
+      <div class="card">
+        <div class="lock-emoji">🔒</div>
+        <h1 style="text-align:center;">Vault locked</h1>
+        <p class="sub" style="text-align:center;">${cfg ? cfg.owner + '/' + cfg.repo : ''}</p>
+        <label>Master password</label>
+        <input id="lk-pw" type="password" autocomplete="off" />
+        <button id="lk-submit">Unlock</button>
+        <div id="lk-status" class="status"></div>
+        <div class="settings-row">
+          <span class="sub">Wrong device/account?</span>
+          <button class="secondary inline" id="lk-reset">Reset connection</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('lk-submit').addEventListener('click', handleUnlock);
+  document.getElementById('lk-pw').addEventListener('keydown', (e) => { if (e.key === 'Enter') handleUnlock(); });
+  document.getElementById('lk-reset').addEventListener('click', () => {
+    if (confirm('This forgets the GitHub connection on THIS device only (your repo and data are untouched). You will need to re-enter your PAT. Continue?')) {
+      localStorage.removeItem(CONFIG_KEY);
+      localStorage.removeItem(TOKEN_BLOB_KEY);
+      state.config = null;
+      state.view = 'setup';
+      render();
+    }
+  });
+}
+
+async function handleUnlock() {
+  const pw = document.getElementById('lk-pw').value;
+  const statusEl = document.getElementById('lk-status');
+  if (!pw) { setStatus(statusEl, 'Enter your master password.', 'err'); return; }
+
+  const tokenBlob = loadTokenBlob();
+  if (!tokenBlob) { setStatus(statusEl, 'No saved connection found on this device. Resetting setup…', 'err'); state.view = 'setup'; setTimeout(render, 1200); return; }
+
+  setStatus(statusEl, 'Unlocking…', 'ok');
+  let tokenData;
+  try {
+    tokenData = await decryptVault(pw, tokenBlob);
+  } catch (e) {
+    setStatus(statusEl, 'Wrong master password.', 'err');
+    return;
+  }
+
+  state.githubToken = tokenData.token;
+  state.masterPassword = pw;
+  state.config = state.config || loadConfig();
+  await loadVaultFromGitHub(statusEl);
+}
+
+async function loadVaultFromGitHub(statusEl) {
+  try {
+    const result = await fetchVaultFile({ token: state.githubToken, ...state.config });
+    if (!result.exists) {
+      state.currentData = { entries: [] };
+      state.currentSha = null;
+      state.vaultSalt = null; // will be generated on first save
+    } else {
+      const decrypted = await decryptVault(state.masterPassword, result.data);
+      state.currentData = decrypted;
+      state.currentSha = result.sha;
+      state.vaultSalt = result.data.salt;
+    }
+    state.dirty = false;
+    state.view = 'main';
+    render();
+    resetIdleTimer();
+  } catch (e) {
+    if (statusEl) setStatus(statusEl, 'Could not load vault: ' + e.message, 'err');
+  }
+}
+
+function renderMain() {
+  app.innerHTML = `
+    <div class="topbar">
+      <div>
+        <h1>🔐 Vault</h1>
+        <p class="sub">${state.config.owner}/${state.config.repo}</p>
+      </div>
+      <div class="actions">
+        <button class="icon-btn" id="mn-settings" title="Settings">⚙️</button>
+        <button class="icon-btn" id="mn-lock" title="Lock now">🔒</button>
+      </div>
+    </div>
+    <div class="dirty-banner ${state.dirty ? 'show' : ''}">Unsaved changes — tap Save to push them to GitHub.</div>
+    <div class="search-row">
+      <input id="mn-search" placeholder="Search entries…" value="${escapeHtml(state.searchQuery)}" autocomplete="off" />
+    </div>
+    <div class="entry-list" id="mn-list"></div>
+    <div class="footer-actions">
+      <button class="secondary" id="mn-new">+ New entry</button>
+      <button id="mn-save" ${state.dirty ? '' : 'disabled'}>Save to GitHub</button>
+    </div>
+    <div id="mn-status" class="status"></div>
+  `;
+
+  // The entry list is rendered separately from the shell (search box, buttons)
+  // so that typing in search only ever touches #mn-list, never the <input>
+  // itself. Recreating the input on every keystroke (via a full re-render) is
+  // what was causing it to lose focus after one character.
+  renderEntryListOnly();
+
+  const searchEl = document.getElementById('mn-search');
+  searchEl.addEventListener('input', (e) => {
+    state.searchQuery = e.target.value;
+    renderEntryListOnly();
+  });
+  document.getElementById('mn-new').addEventListener('click', () => openEditor(null));
+  document.getElementById('mn-save').addEventListener('click', handleSaveToGitHub);
+  document.getElementById('mn-lock').addEventListener('click', () => { if (state.dirty && !confirm('You have unsaved changes that will be lost. Lock anyway?')) return; lock(); });
+  document.getElementById('mn-settings').addEventListener('click', openSettings);
+}
+
+function renderEntryListOnly() {
+  const listEl = document.getElementById('mn-list');
+  if (!listEl) return; // defensive: no-op if called while main view isn't mounted
+
+  const filtered = filterEntries(state.currentData.entries, state.searchQuery)
+    .map(e => ({ entry: e, originalIndex: state.currentData.entries.indexOf(e) }));
+
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div class="empty-state">${state.currentData.entries.length === 0 ? 'No entries yet. Add your first one.' : 'No matches.'}</div>`;
+    return;
+  }
+  listEl.innerHTML = filtered.map(({ entry, originalIndex }) => `
+    <div class="entry-row" data-index="${originalIndex}">
+      <span class="title">${escapeHtml(entry.title)}</span>
+      <span class="count">${entry.fields.length} field${entry.fields.length === 1 ? '' : 's'}</span>
+    </div>
+  `).join('');
+  listEl.querySelectorAll('.entry-row').forEach(row => {
+    row.addEventListener('click', () => openEditor(parseInt(row.dataset.index, 10)));
+  });
+}
+
+function openEditor(index) {
+  state.editIndex = index;
+  state.view = 'editor';
+  render();
+}
+
+function renderEditor() {
+  const isNew = state.editIndex === null;
+  const entry = isNew ? { title: '', fields: [{ key: '', value: '' }] } : state.currentData.entries[state.editIndex];
+
+  app.innerHTML = `
+    <div class="topbar">
+      <h1>${isNew ? 'New entry' : 'Edit entry'}</h1>
+      <button class="icon-btn" id="ed-back" title="Back">←</button>
+    </div>
+    <label>Title</label>
+    <input id="ed-title" value="${escapeHtml(entry.title)}" placeholder="e.g. Instagram" />
+    <label>Fields</label>
+    <div id="ed-fields"></div>
+    <button class="secondary" id="ed-addfield" style="margin-top:10px;">+ Add field</button>
+    <div class="footer-actions">
+      ${isNew ? '' : '<button class="danger" id="ed-delete">Delete</button>'}
+      <button id="ed-done">Done</button>
+    </div>
+  `;
+
+  let fields = entry.fields.map(f => ({ ...f }));
+
+  function renderFields() {
+    const fieldsEl = document.getElementById('ed-fields');
+    fieldsEl.innerHTML = fields.map((f, i) => `
+      <div class="field-row" data-i="${i}">
+        <input class="key-input" placeholder="key" value="${escapeHtml(f.key)}" data-role="key" />
+        <input placeholder="value" value="${escapeHtml(f.value)}" data-role="value" />
+        <button class="remove-field-btn" data-remove="${i}">✕</button>
+      </div>
+    `).join('');
+    fieldsEl.querySelectorAll('.field-row').forEach(row => {
+      const i = parseInt(row.dataset.i, 10);
+      row.querySelector('[data-role="key"]').addEventListener('input', (e) => { fields[i].key = e.target.value; });
+      row.querySelector('[data-role="value"]').addEventListener('input', (e) => { fields[i].value = e.target.value; });
+    });
+    fieldsEl.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', () => { fields.splice(parseInt(btn.dataset.remove, 10), 1); renderFields(); });
+    });
+  }
+  renderFields();
+
+  document.getElementById('ed-addfield').addEventListener('click', () => { fields.push({ key: '', value: '' }); renderFields(); });
+  document.getElementById('ed-back').addEventListener('click', () => { state.view = 'main'; render(); });
+
+  document.getElementById('ed-done').addEventListener('click', () => {
+    const title = document.getElementById('ed-title').value;
+    const cleanFields = fields.filter(f => f.key.trim() !== '');
+    const newEntry = makeEntry(title, cleanFields);
+    state.currentData.entries = upsertEntry(state.currentData.entries, newEntry, state.editIndex);
+    state.dirty = true;
+    state.view = 'main';
+    render();
+  });
+
+  if (!isNew) {
+    document.getElementById('ed-delete').addEventListener('click', () => {
+      if (!confirm(`Delete "${entry.title}"? This can't be undone locally, but GitHub's commit history keeps the old version.`)) return;
+      state.currentData.entries = removeEntry(state.currentData.entries, state.editIndex);
+      state.dirty = true;
+      state.view = 'main';
+      render();
+    });
+  }
+}
+
+async function handleSaveToGitHub() {
+  const statusEl = document.getElementById('mn-status');
+  const saveBtn = document.getElementById('mn-save');
+  saveBtn.disabled = true;
+  setStatus(statusEl, 'Encrypting and pushing to GitHub…', 'ok');
+  try {
+    let vaultFile;
+    if (state.vaultSalt) {
+      vaultFile = await encryptForExistingVault(state.masterPassword, state.vaultSalt, state.currentData);
+    } else {
+      vaultFile = await encryptNewVault(state.masterPassword, state.currentData);
+      state.vaultSalt = vaultFile.salt;
+    }
+    const result = await pushVaultFile({
+      token: state.githubToken, ...state.config,
+      dataObj: vaultFile, expectedSha: state.currentSha,
+      commitMessage: `Update vault (${state.currentData.entries.length} entries)`,
+    });
+    state.currentSha = result.sha;
+    state.dirty = false;
+    render();
+    const freshStatusEl = document.getElementById('mn-status');
+    setStatus(freshStatusEl, 'Saved.', 'ok');
+  } catch (e) {
+    if (e.name === 'ConflictError') {
+      setStatus(statusEl, e.message + ' Reloading latest version — your edit is still open in memory, re-save after checking.', 'warn');
+    } else {
+      setStatus(statusEl, e.message, 'err');
+    }
+    saveBtn.disabled = false;
+  }
+}
+
+function openSettings() {
+  const panel = document.createElement('div');
+  panel.innerHTML = `
+    <div class="centered" style="position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:10;">
+      <div class="card">
+        <h1>Settings</h1>
+        <label>Auto-lock after (minutes idle)</label>
+        <input id="st-idle" type="number" min="1" max="60" value="${state.idleMinutes}" />
+        <hr/>
+        <p class="sub">Rotating your GitHub token? Paste the new one here — it's re-encrypted with your current master password.</p>
+        <label>New PAT (optional)</label>
+        <input id="st-newtoken" type="password" placeholder="github_pat_..." autocomplete="off" />
+        <div class="footer-actions">
+          <button class="secondary" id="st-close">Close</button>
+          <button id="st-save">Save settings</button>
+        </div>
+        <div id="st-status" class="status"></div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  panel.querySelector('#st-close').addEventListener('click', () => panel.remove());
+  panel.querySelector('#st-save').addEventListener('click', async () => {
+    const statusEl = panel.querySelector('#st-status');
+    const idleVal = parseInt(panel.querySelector('#st-idle').value, 10);
+    if (idleVal >= 1 && idleVal <= 60) { state.idleMinutes = idleVal; resetIdleTimer(); }
+
+    const newToken = panel.querySelector('#st-newtoken').value.trim();
+    if (newToken) {
+      try {
+        await fetchVaultFile({ token: newToken, ...state.config }); // verify it works first
+        const tokenBlob = await encryptNewVault(state.masterPassword, { token: newToken });
+        saveTokenBlob(tokenBlob);
+        state.githubToken = newToken;
+        setStatus(statusEl, 'Settings saved, token rotated.', 'ok');
+      } catch (e) {
+        setStatus(statusEl, 'Idle time saved, but new token failed verification: ' + e.message, 'err');
+        return;
+      }
+    } else {
+      setStatus(statusEl, 'Settings saved.', 'ok');
+    }
+    setTimeout(() => panel.remove(), 900);
+  });
+}
+
+/* =========================================================================
+   Helpers
+   ========================================================================= */
+function setStatus(el, msg, kind) { if (!el) return; el.textContent = msg; el.className = 'status show ' + kind; }
+function escapeHtml(str) {
+  return (str || '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+function boot() {
+  const cfg = loadConfig();
+  const tokenBlob = loadTokenBlob();
+  if (!cfg || !tokenBlob) {
+    state.view = 'setup';
+  } else {
+    state.config = cfg;
+    state.view = 'lock';
+  }
+  render();
+}
+boot();
+
+if ('serviceWorker' in navigator) {
+  // Registered as a relative path so this works whether the app is served from
+  // https://<user>.github.io/ (root) or https://<user>.github.io/<repo>/ (project page).
+  navigator.serviceWorker.register('sw.js').catch((err) => {
+    console.warn('Service worker registration failed (app still works, just without offline shell caching):', err);
+  });
+}
+</script>
+</body>
+</html>
