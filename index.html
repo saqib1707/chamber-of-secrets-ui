@@ -61,27 +61,42 @@
   .topbar .actions { display: flex; gap: 6px; }
   .icon-btn {
     width: auto; margin: 0; background: transparent; border: 1px solid var(--border); color: var(--text);
-    padding: 8px 10px; font-size: 1rem; line-height: 1;
+    padding: 8px 10px; font-size: 1rem; line-height: 1; position: relative;
+  }
+  .icon-btn.is-dirty::after {
+    content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px;
+    border-radius: 50%; background: var(--warn); border: 2px solid var(--bg);
   }
   .search-row { margin-bottom: 14px; }
   .entry-list { display: flex; flex-direction: column; gap: 8px; }
   .entry-row {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; transition: background 0.12s ease;
+  }
+  .entry-header {
     padding: 13px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
-    transition: background 0.12s ease;
   }
-  .entry-row:hover { background: var(--panel-hover); }
-  .entry-row:active { opacity: 0.8; }
-  .entry-row .title { font-size: 0.95rem; }
-  .entry-row .count { font-size: 0.75rem; color: var(--muted); }
+  .entry-header:hover { background: var(--panel-hover); }
+  .entry-header .title { font-size: 0.95rem; }
+  .entry-header .meta { display: flex; align-items: center; gap: 8px; }
+  .entry-header .count { font-size: 0.75rem; color: var(--muted); }
+  .entry-header .chevron { font-size: 0.7rem; color: var(--muted); transition: transform 0.15s ease; }
+  .entry-row.expanded .chevron { transform: rotate(90deg); }
+  .entry-body { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+  .entry-title-input { font-size: 0.95rem; font-weight: 600; margin-top: 10px; }
   .empty-state { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 0.9rem; }
-  .field-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
-  .field-row input { flex: 1; }
-  .field-row input.key-input { flex: 0 0 38%; }
-  .remove-field-btn {
-    width: auto; margin: 0; background: transparent; border: 1px solid var(--border); color: var(--bad);
-    padding: 8px 10px; font-size: 0.85rem;
+  .field-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+  .field-row input { flex: 1; min-width: 0; }
+  .field-row input.key-input { flex: 0 0 34%; }
+  .icon-sm-btn {
+    width: auto; margin: 0; flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--text);
+    padding: 8px 9px; font-size: 0.85rem; line-height: 1;
   }
+  .copy-btn { color: var(--muted); }
+  .copy-btn.copied { color: var(--good); border-color: var(--good); }
+  .remove-field-btn { color: var(--bad); }
+  .entry-body-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .entry-body-actions button { margin-top: 0; }
   .dirty-banner {
     background: rgba(232,184,75,0.12); border: 1px solid var(--warn); color: var(--warn);
     border-radius: 8px; padding: 9px 12px; font-size: 0.82rem; margin-bottom: 14px; display: none;
@@ -204,7 +219,7 @@ const TOKEN_BLOB_KEY = 'vaultapp_token_blob';
 const DEFAULT_IDLE_MINUTES = 5;
 
 const state = {
-  view: 'loading',       // 'setup' | 'lock' | 'main' | 'editor'
+  view: 'loading',       // 'setup' | 'lock' | 'main'
   masterPassword: null,  // in-memory only, never persisted
   githubToken: null,     // in-memory only, decrypted from localStorage token blob
   config: null,          // { owner, repo, path }
@@ -212,7 +227,7 @@ const state = {
   currentSha: null,      // null until the vault file exists on GitHub
   currentData: { entries: [] },
   dirty: false,
-  editIndex: null,       // index being edited, or null for a new entry
+  expandedIndices: new Set(), // original-array indices currently expanded inline; several can be open at once
   searchQuery: '',
   idleMinutes: DEFAULT_IDLE_MINUTES,
   idleTimer: null,
@@ -232,7 +247,7 @@ function saveTokenBlob(blob) { localStorage.setItem(TOKEN_BLOB_KEY, JSON.stringi
    ========================================================================= */
 function resetIdleTimer() {
   if (state.idleTimer) clearTimeout(state.idleTimer);
-  if (state.view !== 'main' && state.view !== 'editor') return;
+  if (state.view !== 'main') return;
   state.idleTimer = setTimeout(() => {
     if (state.dirty) {
       // Don't discard unsaved work — just restart the timer and nag via the banner already shown.
@@ -262,7 +277,6 @@ function render() {
   if (state.view === 'setup') return renderSetup();
   if (state.view === 'lock') return renderLock();
   if (state.view === 'main') return renderMain();
-  if (state.view === 'editor') return renderEditor();
   app.innerHTML = '<div class="centered"><div class="sub">Loading…</div></div>';
 }
 
@@ -411,25 +425,26 @@ function renderMain() {
       </div>
       <div class="actions">
         <button class="icon-btn" id="mn-settings" title="Settings">⚙️</button>
+        <button class="icon-btn" id="mn-new" title="New entry">➕</button>
+        <button class="icon-btn ${state.dirty ? 'is-dirty' : ''}" id="mn-save" title="Save to GitHub" ${state.dirty ? '' : 'disabled'}>💾</button>
         <button class="icon-btn" id="mn-lock" title="Lock now">🔒</button>
       </div>
     </div>
-    <div class="dirty-banner ${state.dirty ? 'show' : ''}">Unsaved changes — tap Save to push them to GitHub.</div>
+    <div class="dirty-banner ${state.dirty ? 'show' : ''}">Unsaved changes — tap 💾 to push them to GitHub.</div>
     <div class="search-row">
       <input id="mn-search" placeholder="Search entries…" value="${escapeHtml(state.searchQuery)}" autocomplete="off" />
     </div>
     <div class="entry-list" id="mn-list"></div>
-    <div class="footer-actions">
-      <button class="secondary" id="mn-new">+ New entry</button>
-      <button id="mn-save" ${state.dirty ? '' : 'disabled'}>Save to GitHub</button>
-    </div>
     <div id="mn-status" class="status"></div>
   `;
 
-  // The entry list is rendered separately from the shell (search box, buttons)
-  // so that typing in search only ever touches #mn-list, never the <input>
-  // itself. Recreating the input on every keystroke (via a full re-render) is
-  // what was causing it to lose focus after one character.
+  // The entry list is rendered separately from the shell (search box, topbar)
+  // so that typing in search — or inside any expanded entry's fields — only
+  // ever touches the relevant small piece of DOM, never recreates the search
+  // input itself. A full re-render on every keystroke is what was causing
+  // the search box to lose focus after one character; the same trap applies
+  // to every text input in the expanded entries below, so all of those are
+  // wired to update state directly without calling render().
   renderEntryListOnly();
 
   const searchEl = document.getElementById('mn-search');
@@ -437,10 +452,21 @@ function renderMain() {
     state.searchQuery = e.target.value;
     renderEntryListOnly();
   });
-  document.getElementById('mn-new').addEventListener('click', () => openEditor(null));
+  document.getElementById('mn-new').addEventListener('click', handleNewEntry);
   document.getElementById('mn-save').addEventListener('click', handleSaveToGitHub);
   document.getElementById('mn-lock').addEventListener('click', () => { if (state.dirty && !confirm('You have unsaved changes that will be lost. Lock anyway?')) return; lock(); });
   document.getElementById('mn-settings').addEventListener('click', openSettings);
+}
+
+// Toggle the dirty banner + save icon's indicator without a full re-render,
+// so marking a keystroke "dirty" never risks stealing focus from whatever
+// the user is actively typing in.
+function markDirty() {
+  state.dirty = true;
+  const banner = document.querySelector('.dirty-banner');
+  if (banner) banner.classList.add('show');
+  const saveBtn = document.getElementById('mn-save');
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.classList.add('is-dirty'); }
 }
 
 function renderEntryListOnly() {
@@ -451,89 +477,163 @@ function renderEntryListOnly() {
     .map(e => ({ entry: e, originalIndex: state.currentData.entries.indexOf(e) }));
 
   if (filtered.length === 0) {
-    listEl.innerHTML = `<div class="empty-state">${state.currentData.entries.length === 0 ? 'No entries yet. Add your first one.' : 'No matches.'}</div>`;
+    listEl.innerHTML = `<div class="empty-state">${state.currentData.entries.length === 0 ? 'No entries yet. Tap ➕ to add your first one.' : 'No matches.'}</div>`;
     return;
   }
-  listEl.innerHTML = filtered.map(({ entry, originalIndex }) => `
-    <div class="entry-row" data-index="${originalIndex}">
-      <span class="title">${escapeHtml(entry.title)}</span>
-      <span class="count">${entry.fields.length} field${entry.fields.length === 1 ? '' : 's'}</span>
-    </div>
-  `).join('');
-  listEl.querySelectorAll('.entry-row').forEach(row => {
-    row.addEventListener('click', () => openEditor(parseInt(row.dataset.index, 10)));
+
+  listEl.innerHTML = filtered.map(({ entry, originalIndex }) => renderEntryRowHtml(entry, originalIndex)).join('');
+
+  listEl.querySelectorAll('.entry-header').forEach(header => {
+    header.addEventListener('click', () => toggleExpand(parseInt(header.dataset.index, 10)));
+  });
+
+  filtered.forEach(({ originalIndex }) => {
+    if (state.expandedIndices.has(originalIndex)) wireEntryBody(originalIndex);
   });
 }
 
-function openEditor(index) {
-  state.editIndex = index;
-  state.view = 'editor';
-  render();
-}
-
-function renderEditor() {
-  const isNew = state.editIndex === null;
-  const entry = isNew ? { title: '', fields: [{ key: '', value: '' }] } : state.currentData.entries[state.editIndex];
-
-  app.innerHTML = `
-    <div class="topbar">
-      <h1>${isNew ? 'New entry' : 'Edit entry'}</h1>
-      <button class="icon-btn" id="ed-back" title="Back">←</button>
-    </div>
-    <label>Title</label>
-    <input id="ed-title" value="${escapeHtml(entry.title)}" placeholder="e.g. Instagram" />
-    <label>Fields</label>
-    <div id="ed-fields"></div>
-    <button class="secondary" id="ed-addfield" style="margin-top:10px;">+ Add field</button>
-    <div class="footer-actions">
-      ${isNew ? '' : '<button class="danger" id="ed-delete">Delete</button>'}
-      <button id="ed-done">Done</button>
+function renderEntryRowHtml(entry, originalIndex) {
+  const isExpanded = state.expandedIndices.has(originalIndex);
+  return `
+    <div class="entry-row ${isExpanded ? 'expanded' : ''}" data-index="${originalIndex}">
+      <div class="entry-header" data-index="${originalIndex}">
+        <span class="title">${escapeHtml(entry.title)}</span>
+        <span class="meta">
+          <span class="count">${entry.fields.length} field${entry.fields.length === 1 ? '' : 's'}</span>
+          <span class="chevron">▶</span>
+        </span>
+      </div>
+      ${isExpanded ? renderEntryBodyHtml(entry, originalIndex) : ''}
     </div>
   `;
+}
 
-  let fields = entry.fields.map(f => ({ ...f }));
+function renderEntryBodyHtml(entry, originalIndex) {
+  const fieldsHtml = entry.fields.map((f, fi) => `
+    <div class="field-row" data-fi="${fi}">
+      <input class="key-input" placeholder="key" value="${escapeHtml(f.key)}" data-role="key" />
+      <input placeholder="value" value="${escapeHtml(f.value)}" data-role="value" />
+      <button class="icon-sm-btn copy-btn" data-role="copy" title="Copy value">📋</button>
+      <button class="icon-sm-btn remove-field-btn" data-role="remove" title="Remove field">✕</button>
+    </div>
+  `).join('');
 
-  function renderFields() {
-    const fieldsEl = document.getElementById('ed-fields');
-    fieldsEl.innerHTML = fields.map((f, i) => `
-      <div class="field-row" data-i="${i}">
-        <input class="key-input" placeholder="key" value="${escapeHtml(f.key)}" data-role="key" />
-        <input placeholder="value" value="${escapeHtml(f.value)}" data-role="value" />
-        <button class="remove-field-btn" data-remove="${i}">✕</button>
+  return `
+    <div class="entry-body" data-index="${originalIndex}">
+      <input class="entry-title-input" data-role="title" value="${escapeHtml(entry.title)}" placeholder="Title" />
+      <div data-role="field-list">${fieldsHtml}</div>
+      <div class="entry-body-actions">
+        <button class="secondary icon-sm-btn" style="flex:1; width:auto;" data-role="add-field">+ Add field</button>
+        <button class="danger icon-sm-btn" style="flex:1; width:auto;" data-role="delete-entry">Delete entry</button>
       </div>
-    `).join('');
-    fieldsEl.querySelectorAll('.field-row').forEach(row => {
-      const i = parseInt(row.dataset.i, 10);
-      row.querySelector('[data-role="key"]').addEventListener('input', (e) => { fields[i].key = e.target.value; });
-      row.querySelector('[data-role="value"]').addEventListener('input', (e) => { fields[i].value = e.target.value; });
-    });
-    fieldsEl.querySelectorAll('[data-remove]').forEach(btn => {
-      btn.addEventListener('click', () => { fields.splice(parseInt(btn.dataset.remove, 10), 1); renderFields(); });
-    });
-  }
-  renderFields();
+    </div>
+  `;
+}
 
-  document.getElementById('ed-addfield').addEventListener('click', () => { fields.push({ key: '', value: '' }); renderFields(); });
-  document.getElementById('ed-back').addEventListener('click', () => { state.view = 'main'; render(); });
+function toggleExpand(index) {
+  if (state.expandedIndices.has(index)) state.expandedIndices.delete(index);
+  else state.expandedIndices.add(index);
+  renderEntryListOnly();
+}
 
-  document.getElementById('ed-done').addEventListener('click', () => {
-    const title = document.getElementById('ed-title').value;
-    const cleanFields = fields.filter(f => f.key.trim() !== '');
-    const newEntry = makeEntry(title, cleanFields);
-    state.currentData.entries = upsertEntry(state.currentData.entries, newEntry, state.editIndex);
-    state.dirty = true;
-    state.view = 'main';
-    render();
+// Attaches live listeners to one expanded entry's body. Text inputs write
+// straight into state.currentData without re-rendering (so focus is never
+// lost mid-keystroke); structural changes (add/remove field, delete entry,
+// title that affects the collapsed header) re-render just the list.
+function wireEntryBody(originalIndex) {
+  const bodyEl = document.querySelector(`.entry-body[data-index="${originalIndex}"]`);
+  if (!bodyEl) return;
+  const entry = state.currentData.entries[originalIndex];
+
+  const titleInput = bodyEl.querySelector('[data-role="title"]');
+  titleInput.addEventListener('input', (e) => {
+    entry.title = e.target.value;
+    markDirty();
+    const headerTitleEl = document.querySelector(`.entry-header[data-index="${originalIndex}"] .title`);
+    if (headerTitleEl) headerTitleEl.textContent = e.target.value || 'Untitled';
   });
 
-  if (!isNew) {
-    document.getElementById('ed-delete').addEventListener('click', () => {
-      if (!confirm(`Delete "${entry.title}"? This can't be undone locally, but GitHub's commit history keeps the old version.`)) return;
-      state.currentData.entries = removeEntry(state.currentData.entries, state.editIndex);
-      state.dirty = true;
-      state.view = 'main';
-      render();
+  bodyEl.querySelectorAll('.field-row').forEach(row => {
+    const fi = parseInt(row.dataset.fi, 10);
+    row.querySelector('[data-role="key"]').addEventListener('input', (e) => {
+      entry.fields[fi].key = e.target.value;
+      markDirty();
     });
+    row.querySelector('[data-role="value"]').addEventListener('input', (e) => {
+      entry.fields[fi].value = e.target.value;
+      markDirty();
+    });
+    row.querySelector('[data-role="copy"]').addEventListener('click', (e) => {
+      copyToClipboard(entry.fields[fi].value, e.currentTarget);
+    });
+    row.querySelector('[data-role="remove"]').addEventListener('click', () => {
+      entry.fields.splice(fi, 1);
+      markDirty();
+      renderEntryListOnly();
+    });
+  });
+
+  bodyEl.querySelector('[data-role="add-field"]').addEventListener('click', () => {
+    entry.fields.push({ key: '', value: '' });
+    markDirty();
+    renderEntryListOnly();
+  });
+
+  bodyEl.querySelector('[data-role="delete-entry"]').addEventListener('click', () => {
+    if (!confirm(`Delete "${entry.title}"? This can't be undone locally, but GitHub's commit history keeps the old version.`)) return;
+    state.currentData.entries = removeEntry(state.currentData.entries, originalIndex);
+    state.expandedIndices.delete(originalIndex);
+    markDirty();
+    renderEntryListOnly();
+  });
+}
+
+function handleNewEntry() {
+  const entry = makeEntry('', [{ key: '', value: '' }]);
+  state.currentData.entries = upsertEntry(state.currentData.entries, entry, null);
+  const newIndex = state.currentData.entries.length - 1;
+  state.expandedIndices.add(newIndex);
+  markDirty();
+
+  // A new entry has a blank title, so an active search filter would hide it
+  // immediately after creation — clear the filter so it's actually visible.
+  if (state.searchQuery) {
+    state.searchQuery = '';
+    const searchEl = document.getElementById('mn-search');
+    if (searchEl) searchEl.value = '';
+  }
+  renderEntryListOnly();
+  const titleInput = document.querySelector(`.entry-body[data-index="${newIndex}"] [data-role="title"]`);
+  if (titleInput) { titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' }); titleInput.focus(); }
+}
+
+// Copies text to the clipboard, with a fallback for contexts where the
+// modern Clipboard API is unavailable (e.g. some file:// / non-HTTPS setups).
+// Gives brief visual feedback on the button itself rather than a popup.
+async function copyToClipboard(text, buttonEl) {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch (e) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e2) {
+      ok = false;
+    }
+  }
+  if (buttonEl) {
+    const original = buttonEl.textContent;
+    buttonEl.textContent = ok ? '✓' : '!';
+    buttonEl.classList.toggle('copied', ok);
+    setTimeout(() => { buttonEl.textContent = original; buttonEl.classList.remove('copied'); }, 1200);
   }
 }
 
@@ -543,6 +643,15 @@ async function handleSaveToGitHub() {
   saveBtn.disabled = true;
   setStatus(statusEl, 'Encrypting and pushing to GitHub…', 'ok');
   try {
+    // Inline editing has no explicit "Done" step, so a field row left with an
+    // empty key (e.g. "+ Add field" tapped then abandoned) is cleaned up here,
+    // right before it would otherwise get encrypted and committed.
+    state.currentData.entries.forEach(e => {
+      e.fields = e.fields.filter(f => f.key.trim() !== '');
+      if (!e.title || !e.title.trim()) e.title = 'Untitled';
+    });
+    renderEntryListOnly();
+
     let vaultFile;
     if (state.vaultSalt) {
       vaultFile = await encryptForExistingVault(state.masterPassword, state.vaultSalt, state.currentData);
@@ -582,6 +691,13 @@ function openSettings() {
         <p class="sub">Rotating your GitHub token? Paste the new one here — it's re-encrypted with your current master password.</p>
         <label>New PAT (optional)</label>
         <input id="st-newtoken" type="password" placeholder="github_pat_..." autocomplete="off" />
+        <hr/>
+        <p class="sub">Import entries from a local file (e.g. output from the doc migration script). This is read directly in your browser — nothing leaves this device until you hit "Save to GitHub" afterward.</p>
+        <label>Entries JSON file</label>
+        <input id="st-importfile" type="file" accept="application/json" />
+        <div id="st-import-preview" class="sub" style="margin-top:6px;"></div>
+        <button class="secondary" id="st-import-btn" disabled style="margin-top:10px;">Add these to my vault</button>
+        <hr/>
         <div class="footer-actions">
           <button class="secondary" id="st-close">Close</button>
           <button id="st-save">Save settings</button>
@@ -592,6 +708,43 @@ function openSettings() {
   `;
   document.body.appendChild(panel);
   panel.querySelector('#st-close').addEventListener('click', () => panel.remove());
+
+  let pendingImportEntries = null;
+  panel.querySelector('#st-importfile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    const previewEl = panel.querySelector('#st-import-preview');
+    const importBtn = panel.querySelector('#st-import-btn');
+    pendingImportEntries = null;
+    importBtn.disabled = true;
+    previewEl.textContent = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (!parsed || !Array.isArray(parsed.entries)) {
+        throw new Error('Expected a JSON object shaped like { "entries": [...] }.');
+      }
+      const validEntries = parsed.entries.filter(e => e && typeof e.title === 'string' && Array.isArray(e.fields));
+      const skipped = parsed.entries.length - validEntries.length;
+      if (validEntries.length === 0) {
+        throw new Error('No valid entries found in this file.');
+      }
+      const titles = validEntries.slice(0, 5).map(e => e.title).join(', ');
+      previewEl.textContent = `Found ${validEntries.length} valid entries (first few: ${titles}${validEntries.length > 5 ? '…' : ''})` + (skipped ? ` — ${skipped} malformed entries skipped.` : '');
+      pendingImportEntries = validEntries;
+      importBtn.disabled = false;
+    } catch (err) {
+      previewEl.textContent = 'Could not read file: ' + err.message;
+    }
+  });
+  panel.querySelector('#st-import-btn').addEventListener('click', () => {
+    if (!pendingImportEntries) return;
+    if (!confirm(`Add ${pendingImportEntries.length} entries to your vault? Nothing is pushed to GitHub until you tap "Save to GitHub" afterward.`)) return;
+    state.currentData.entries = state.currentData.entries.concat(pendingImportEntries);
+    state.dirty = true;
+    panel.remove();
+    render();
+  });
   panel.querySelector('#st-save').addEventListener('click', async () => {
     const statusEl = panel.querySelector('#st-status');
     const idleVal = parseInt(panel.querySelector('#st-idle').value, 10);
